@@ -196,6 +196,34 @@ $explorerWasRunning = Stop-Explorer
 if ($SetGlobalDefault) {
     Write-Host "Setting AllFolders global default..."
     Set-BagView "$BAGS\AllFolders\Shell" $lvm $mode $iconSize
+
+    # Also update FolderTypes TopViews in HKCU so Explorer uses the correct view
+    # when it creates a brand-new bag for a folder it has never visited.
+    # Explorer reads HKCU over HKLM; copy from HKLM if the HKCU key doesn't exist yet.
+    $LMFT = 'HKLM\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderTypes'
+    $CUFT = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FolderTypes'
+    # {5C4F28B5-...} = Generic/General Items — used for regular filesystem folders
+    $genericFT = "{5C4F28B5-F869-4E84-8E60-F11DB97C5CC7}"
+    $topViewsPath = "$CUFT\$genericFT\TopViews"
+
+    if (-not (Test-Path $topViewsPath)) {
+        Write-Host "Copying FolderTypes\$genericFT from HKLM to HKCU..."
+        $tmp = [System.IO.Path]::GetTempFileName() + '.reg'
+        reg export "$LMFT\$genericFT" $tmp /y 2>$null | Out-Null
+        $content = Get-Content $tmp -Raw
+        $content = $content -replace 'HKEY_LOCAL_MACHINE', 'HKEY_CURRENT_USER'
+        Set-Content $tmp $content -Encoding Unicode
+        reg import $tmp 2>$null | Out-Null
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path $topViewsPath) {
+        Write-Host "Updating FolderTypes TopViews..."
+        Get-ChildItem $topViewsPath | ForEach-Object {
+            Set-ItemProperty $_.PSPath -Name LogicalViewMode -Value $lvm  -Type DWord
+            Set-ItemProperty $_.PSPath -Name IconSize        -Value $iconSize -Type DWord
+        }
+    }
 }
 
 # Update per-folder bags
