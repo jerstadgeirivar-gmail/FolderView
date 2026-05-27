@@ -24,7 +24,7 @@ No GUI. No elevation. One command.
 ## The command
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Utvikling\Github\FolderView\Set-FolderView.ps1" `
+powershell -ExecutionPolicy Bypass -File "C:\Tools\FolderView\Set-FolderView.ps1" `
     -Path "C:\YourFolder" -View LargeIcons -SetGlobalDefault
 ```
 
@@ -62,7 +62,7 @@ After running, confirm the registry was written correctly:
 
 ```powershell
 # 1. Find the bag number for your folder from the script's Verbose output
-#    e.g. "[bag  79]  C:\Slett"
+#    e.g. "[bag  79]  C:\MyFolder"
 
 # 2. Read the written values
 $slot = 79   # replace with actual slot
@@ -94,7 +94,7 @@ The folder → bag mapping lives in the `BagMRU` tree next to `Bags`:
 BagMRU\              ← root
   1\                 ← "This PC" node
     0\               ← C:\ drive node  (SHITEMID: 27 bytes, type=0x2F, drive letter at byte[3])
-      8\             ← C:\Slett        (SHITEMID contains "Slett" as Unicode)
+      8\             ← C:\MyFolder     (SHITEMID contains folder name as Unicode)
         NodeSlot=79  ← → Bags\79\Shell\{GUID}
 ```
 

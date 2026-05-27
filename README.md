@@ -38,7 +38,7 @@ Copilot will generate the exact `Set-FolderView.ps1` command, explain what it do
 ## Usage
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Set-FolderView.ps1 -Path "C:\Slett" -View LargeIcons -SetGlobalDefault
+powershell -ExecutionPolicy Bypass -File Set-FolderView.ps1 -Path "C:\MyFolder" -View LargeIcons -SetGlobalDefault
 ```
 
 ## Parameters

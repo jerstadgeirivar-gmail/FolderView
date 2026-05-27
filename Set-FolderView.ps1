@@ -10,7 +10,7 @@
     take effect immediately.
 
 .PARAMETER Path
-    Root folder to apply the view to.  Example: C:\Slett
+    Root folder to apply the view to.  Example: C:\MyFolder
 
 .PARAMETER View
     One of: ExtraLargeIcons, LargeIcons (default), MediumIcons, SmallIcons,
@@ -24,7 +24,7 @@
     have never been opened in Explorer will also use the chosen view on first visit.
 
 .EXAMPLE
-    .\Set-FolderView.ps1 -Path "C:\Slett" -View LargeIcons -SetGlobalDefault
+    .\Set-FolderView.ps1 -Path "C:\MyFolder" -View LargeIcons -SetGlobalDefault
 #>
 [CmdletBinding()]
 param(
