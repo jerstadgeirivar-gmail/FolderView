@@ -17,7 +17,7 @@
     Output PNG path. Default: C:\Windows\Temp\capture.png
 
 .EXAMPLE
-    .\capture-window.ps1 -Target "Slett" -Out "C:\Temp\result.png"
+    .\capture-window.ps1 -Target "MyWindowName" -Out "C:\Temp\result.png"
 #>
 param(
     [string]$Target = "",
