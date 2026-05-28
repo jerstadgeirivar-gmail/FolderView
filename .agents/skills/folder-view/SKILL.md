@@ -3,11 +3,11 @@ name: folder-view
 description: >
   Set Windows Explorer view mode (Large Icons, Details, etc.) for a folder tree by writing
   directly to Shell Bags registry — no GUI, no elevation needed. Use when a user wants to
-  force a specific folder and all its subfolders to a fixed view. Restarts Explorer automatically.
+  set the Explorer view mode for a folder, optionally cascading to all subfolders. Restarts Explorer automatically.
   WHEN: set folder to large icons, force explorer view, set view mode recursively, change folder
   view without GUI, set all subfolders to large icons, fix explorer view, shell bags, folder view
   registry, set C:\Something to large icons.
-argument-hint: "-Path <folder> -View <LargeIcons|Details|...> [-SetGlobalDefault]"
+argument-hint: "-Path <folder> -View <ExtraLargeIcons|LargeIcons|MediumIcons|SmallIcons|List|Details|Tiles|Content> [-PrimeShellBags] [-Recurse] [-Exclude 'name1','name2'] [-DelayMs 300] [-SetGlobalDefault]"
 ---
 
 # FolderView Skill
@@ -24,11 +24,21 @@ No GUI. No elevation. One command.
 ## The command
 
 ```powershell
+# Recommended: prime Shell Bags then set view (works for unvisited folders too)
 powershell -ExecutionPolicy Bypass -File "C:\Tools\FolderView\Set-FolderView.ps1" `
-    -Path "C:\YourFolder" -View LargeIcons -SetGlobalDefault
+    -Path "C:\YourFolder" -View LargeIcons -PrimeShellBags
+
+# Fast: update only folders already visited in Explorer (no windows opened)
+powershell -ExecutionPolicy Bypass -File "C:\Tools\FolderView\Set-FolderView.ps1" `
+    -Path "C:\YourFolder" -View LargeIcons
 ```
 
-Always include **`-SetGlobalDefault`** unless you only want to update folders already visited in Explorer.
+> Replace the script path with the actual install location; resolve it relative to the skill directory if needed.
+
+> **WARNING — do NOT add `-SetGlobalDefault` unless the user explicitly asks to change the view for ALL folders.**
+> That flag writes to `AllFolders\Shell` and patches `FolderTypes` in HKCU, which makes the chosen view the Explorer default for every folder that has no per-folder bag yet. To undo it, run `Restore-GlobalDefault.ps1` (see below).
+
+> **Note on unvisited folders:** Explorer creates Shell Bag entries the first time a folder is opened. This script only updates existing entries. Use `-PrimeShellBags` to have Explorer visit every folder first — the script navigates Explorer through the entire tree via COM, waits for bags to be persisted, then updates them all.
 
 ---
 
@@ -39,7 +49,33 @@ Always include **`-SetGlobalDefault`** unless you only want to update folders al
 | `-Path` | ✅ | — | Root folder to apply the view to |
 | `-View` | | `LargeIcons` | View mode name (see table below) |
 | `-Recurse` | | `$true` | Apply to all subfolders |
-| `-SetGlobalDefault` | | off | Also set the AllFolders global default |
+| `-PrimeShellBags` | | off | Navigate Explorer through every folder first so Explorer creates real Shell Bag entries. Recommended for folders that have never been opened. |
+| `-DelayMs` | | `100` | Milliseconds between folder navigations during priming. Increase (e.g. `500`) on slow machines or network drives if Explorer misses folders. |
+| `-Exclude` | | `@()` | Folder names to skip (and their entire subtree). Merged with `folderview-exclude.txt` in the root folder. Example: `-Exclude '.venv','node_modules'` |
+| `-SetGlobalDefault` | | off | **Side-effect: changes the default view for ALL folders.** Only use when the user explicitly asks for a system-wide default change. |
+
+> **Path constraint:** Only local filesystem paths (e.g. `C:\…`, `I:\…`) are supported. UNC paths are not handled.
+
+> **View validation:** If `-View` is not one of the values in the View modes table, the script aborts before stopping Explorer and prints the list of valid values.
+
+---
+
+## Exclude config file
+
+Place a `folderview-exclude.txt` file in the root `-Path` folder to persistently exclude folder names:
+
+```
+# folderview-exclude.txt
+# One folder name per line. Folder and all its subfolders are skipped.
+# Lines starting with # are comments.
+
+.git
+.venv
+node_modules
+Filer
+```
+
+Entries are merged with any `-Exclude` values passed on the command line. Matching is case-insensitive and applies to the folder name at any depth in the tree.
 
 ## View modes
 
@@ -53,6 +89,20 @@ Always include **`-SetGlobalDefault`** unless you only want to update folders al
 | `Details` | — | Details |
 | `Tiles` | — | Tiles |
 | `Content` | — | Content |
+
+---
+
+## Restoring the global default
+
+If `-SetGlobalDefault` was used unintentionally and the view changed for all folders, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Tools\FolderView\Restore-GlobalDefault.ps1"
+```
+
+This removes the `AllFolders\Shell` override and the HKCU `FolderTypes` copy so Explorer
+falls back to its built-in defaults. Per-folder bags written by `Set-FolderView.ps1` are
+not touched — individual folders keep their assigned view.
 
 ---
 
@@ -110,23 +160,39 @@ The script walks that tree from root → drive → each path component, matching
 | `Registry::HKCU:\...` is invalid | Use `HKCU:\...` directly |
 | Drive SHITEMID length check `== 25` fails | Registry stores SHITEMID + 2-byte PIDL terminator = 27 bytes; check `>= 6` instead |
 | ASCII-only search for "C:" matches unrelated giant blobs | Use exact byte-signature check for drive nodes |
+| Synthetic ShellBag creation is impossible | Explorer NEVER looks up existing BagMRU entries before creating new ones — it always creates fresh entries on first navigation. Any manually written BagMRU entries are permanently ignored. Use `-PrimeShellBags` instead. |
+| `Shell.Application.Navigate2` silently drops fast navigations | Introduce `-DelayMs` between calls; re-acquire the window handle if the window closes mid-run |
 
 ---
 
-## Script structure (SOLID)
+## Script structure
 
 ```
 Set-FolderView.ps1
 ├── param block
-├── $VIEW_MAP hashtable          ← all view mode values
-├── Stop-Explorer                ← single job: stop, return bool
-├── Start-Explorer               ← single job: start
-├── Get-DriveNode(key, letter)   ← find C:\ SHITEMID in a BagMRU key
-├── Get-SubfolderNode(key, name) ← find folder SHITEMID by Unicode name
-├── Resolve-FolderSlot(path)     ← walk BagMRU tree → NodeSlot
-├── Set-BagView(path, lvm, mode, iconSize) ← write 3 registry values
-└── Main block                   ← linear: collect → stop → write → start
+├── $VIEW_MAP hashtable                      ← all view mode values
+├── Stop-Explorer                            ← stop explorer.exe, return bool
+├── Start-Explorer                           ← start explorer.exe
+├── Set-BagView(path, lvm, mode, iconSize)   ← write Mode/LogicalViewMode/IconSize
+├── Get-DriveNode(key, letter)               ← find drive SHITEMID in BagMRU key
+├── Get-SubfolderNode(key, name)             ← find folder SHITEMID by Unicode name
+├── Resolve-FolderSlot(path)                 ← walk BagMRU tree → NodeSlot (read-only, no creation)
+├── Invoke-ExplorerVisitFolders(folders, ms) ← navigate Explorer via Shell.Application COM
+├── Copy-FolderTypeToHkcu(lmPath, cuPath)    ← copy FolderTypes key HKLM→HKCU for -SetGlobalDefault
+└── Main block
+    ├── Resolve & validate -Path
+    ├── Load folderview-exclude.txt, merge with -Exclude
+    ├── Collect folders (filtered by exclusions)
+    ├── [optional] Invoke-ExplorerVisitFolders  ← -PrimeShellBags
+    ├── Stop-Explorer
+    ├── [optional] Set AllFolders bag + TopViews ← -SetGlobalDefault
+    ├── For each folder: Resolve-FolderSlot → Set-BagView
+    └── Start-Explorer + report
 ```
+
+> **Explorer does not create bags for excluded folders.** The exclusion filter runs before both the visit pass and the registry update pass — excluded folders are never opened and never updated.
+
+> **`Resolve-FolderSlot` is strictly read-only.** It walks the BagMRU tree and returns a NodeSlot only if Explorer has already created the entry. It never fabricates entries. Folders with no bag are reported as "No bag" in the summary.
 
 ---
 
